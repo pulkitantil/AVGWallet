@@ -2,11 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  output: 'export',
-
-  assetPrefix: './',
-
-  distDir: 'build',
+  
 
   webpack: (config) => {
     config.resolve.fallback = {

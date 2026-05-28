@@ -55,7 +55,6 @@ Currently supported chains:
 * Modern navy blue Web3 theme
 * Glassmorphism-inspired cards
 * Responsive mobile-friendly UI
-* TrustWallet-inspired design
 * Smooth animations and transitions
 
 ---
