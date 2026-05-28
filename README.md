@@ -1,12 +1,12 @@
 # AGILAVETRI Wallet
 
-A modern multi-chain non-custodial crypto wallet built using Next.js, TypeScript, ethers.js, Ankr RPC and Alchemy.
+A modern multi-chain non-custodial crypto wallet built using Next.js, TypeScript, ethers.js and Alchemy RPC infrastructure.
 
 ---
 
-## 🚀 Features
+# 🚀 Features
 
-### ✅ Multi-Chain Support
+## ✅ Multi-Chain Support
 
 Currently supported chains:
 
@@ -19,9 +19,9 @@ Currently supported chains:
 
 ---
 
-## ✨ Current Functionalities
+# ✨ Current Functionalities
 
-### 🔐 Wallet Management
+## 🔐 Wallet Management
 
 * Create new wallet
 * Import wallet using recovery phrase
@@ -30,27 +30,38 @@ Currently supported chains:
 * Export private keys
 * Multi-network account generation
 
-### 💸 Transactions
+---
+
+## 💸 Transactions
 
 * Send crypto transactions
 * Real BNB Mainnet transaction tested
 * Gas estimation support
 * Network-based transaction handling
+* Multi-chain transaction signing
 
-### 🪙 Token Support
+---
+
+## 🪙 Token Support
 
 * Custom token import
 * ERC20 metadata fetching
 * Token balance fetching
 * Multi-network token handling
 
-### 🌐 Blockchain Infrastructure
+---
 
-* Ankr RPC integration for EVM chains
-* Alchemy RPC integration for Solana
+## 🌐 Blockchain Infrastructure
+
+* Alchemy RPC integration
 * Real blockchain interaction using ethers.js
+* Multi-chain RPC architecture
+* Dynamic network switching
+* RPC-based wallet communication
 
-### 🎨 UI / UX
+---
+
+## 🎨 UI / UX
 
 * Modern navy blue Web3 theme
 * Glassmorphism-inspired cards
@@ -59,41 +70,43 @@ Currently supported chains:
 
 ---
 
-## 🛠️ Tech Stack
+# 🛠️ Tech Stack
 
-### Frontend
+## Frontend
 
 * Next.js 14
 * TypeScript
 * Tailwind CSS
 * React
 
-### Blockchain
+---
+
+## Blockchain
 
 * ethers.js
 * Solana Web3.js
 * BIP39
 * tiny-secp256k1
 
-### RPC Providers
+---
 
-* Ankr
+## RPC Provider
+
 * Alchemy
 
 ---
 
-## ⚙️ Environment Variables
+# ⚙️ Environment Variables
 
-Create a `.env` file in the root directory:
+Create a `.env.local` file in the root directory:
 
 ```env
-NEXT_PUBLIC_ANKR_API_KEY=your_ankr_api_key
-NEXT_PUBLIC_ALCHEMY_SOLANA_API_KEY=your_alchemy_api_key
+NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
 ```
 
 ---
 
-## 📦 Installation
+# 📦 Installation
 
 ```bash
 npm install
@@ -101,7 +114,7 @@ npm install
 
 ---
 
-## ▶️ Run Development Server
+# ▶️ Run Development Server
 
 ```bash
 npm run dev
@@ -115,7 +128,76 @@ http://localhost:3000
 
 ---
 
-## 🧠 Architecture Overview
+# 🚀 Production Deployment (Linux / Ubuntu)
+
+This project runs as a standard Next.js production application using PM2.
+
+---
+
+## 1️⃣ Install Dependencies
+
+```bash
+npm install
+```
+
+---
+
+## 2️⃣ Create Environment File
+
+Create:
+
+```bash
+.env.local
+```
+
+Add:
+
+```env
+NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
+```
+
+---
+
+## 3️⃣ Generate Production Build
+
+```bash
+npm run build
+```
+
+This creates the `.next` production build folder.
+
+---
+
+## 4️⃣ Start Production Server
+
+```bash
+pm2 start npm --name avgwallet -- start
+```
+
+---
+
+## 5️⃣ Restart After Updates
+
+Whenever new code is pulled:
+
+```bash
+git pull
+npm install
+npm run build
+pm2 restart avgwallet
+```
+
+---
+
+## 6️⃣ Check Logs
+
+```bash
+pm2 logs avgwallet
+```
+
+---
+
+# 🧠 Architecture Overview
 
 This project is a:
 
@@ -124,7 +206,9 @@ This project is a:
 The wallet does not create its own blockchain.
 Instead, it interacts with existing blockchains using RPC providers.
 
-### Current Architecture
+---
+
+## Current Architecture
 
 * Local wallet storage using browser localStorage
 * RPC-based blockchain communication
@@ -134,15 +218,17 @@ Instead, it interacts with existing blockchains using RPC providers.
 
 ---
 
-## 🔒 Security Notes
+# 🔒 Security Notes
 
-### Current State
+## Current State
 
 * Wallet data stored in localStorage
 * Recovery phrase export supported
 * Private key export supported
 
-### Planned Improvements
+---
+
+## Planned Improvements
 
 * AES encryption for wallet credentials
 * Secure vault architecture
@@ -152,7 +238,7 @@ Instead, it interacts with existing blockchains using RPC providers.
 
 ---
 
-## 📌 Planned Features
+# 📌 Planned Features
 
 * Multi-wallet support
 * WalletConnect integration
@@ -167,9 +253,9 @@ Instead, it interacts with existing blockchains using RPC providers.
 
 ---
 
-## 🧪 Current Status
+# 🧪 Current Status
 
-### Successfully Tested
+## Successfully Tested
 
 ✅ Real BNB Mainnet transaction
 
@@ -183,9 +269,11 @@ Instead, it interacts with existing blockchains using RPC providers.
 
 ✅ Multi-chain balance fetching
 
+✅ Linux production deployment
+
 ---
 
-## 📁 Project Structure
+# 📁 Project Structure
 
 ```bash
 app/
@@ -199,13 +287,42 @@ public/
 
 ---
 
-## 👨‍💻 Developer
+# ⚠️ Important Notes
+
+## Environment Variables
+
+Never upload:
+
+```bash
+.env.local
+```
+
+to GitHub.
+
+Add this in `.gitignore`:
+
+```bash
+.env.local
+```
+
+---
+
+## Recommended Node Version
+
+```bash
+Node.js v18+
+```
+
+Check version:
+
+```bash
+node -v
+```
+
+---
+
+# 👨‍💻 Developer
 
 Built and customized by Pulkit Antil.
 
 ---
-
-## ⚠️ Disclaimer
-
-This project is currently intended for learning, experimentation and development purposes.
-Do not use it to store large amounts of real crypto funds until production-grade security is implemented.
