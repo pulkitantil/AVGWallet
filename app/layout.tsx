@@ -3,7 +3,12 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'AVG Wallet',
-  description: 'Multi-chain cryptocurrency wallet supporting Ethereum, Polygon, Binance, Base, Solana, and Bitcoin',
+  description:
+    'Multi-chain cryptocurrency wallet supporting Ethereum, Polygon, Binance, Base, Solana, and Bitcoin',
+
+  icons: {
+    icon: '/logo.png',
+  },
 };
 
 export default function RootLayout({
