@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-
-  
+  experimental: {
+    serverComponentsExternalPackages: ['tiny-secp256k1', 'bitcoinjs-lib'],
+  },
 
   webpack: (config) => {
     config.resolve.fallback = {

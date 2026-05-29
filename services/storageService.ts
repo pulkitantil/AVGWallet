@@ -20,7 +20,7 @@ async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey>
     ['deriveKey']
   );
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 210_000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: 210_000, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -143,9 +143,9 @@ export class StorageService {
       const key = await deriveKey(password, fromBase64(salt));
 
       const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: fromBase64(iv) },
+        { name: 'AES-GCM', iv: fromBase64(iv) as BufferSource },
         key,
-        fromBase64(data)
+        fromBase64(data) as BufferSource
       );
 
       return JSON.parse(new TextDecoder().decode(decrypted)) as MultiChainWallet;

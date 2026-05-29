@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { PlusCircle, Download, ArrowLeft, Copy, Check, Eye, EyeOff, Key, Lock } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { PlusCircle, Download, ArrowLeft, Copy, Check, Eye, EyeOff, Key, Lock, ShieldCheck } from 'lucide-react';
 import { WalletService } from '@/services/walletService';
 import { StorageService } from '@/services/storageService';
 import { BlockchainNetwork, MultiChainWallet } from '@/types';
@@ -11,8 +11,18 @@ interface CreateWalletProps {
   onBack: () => void;
 }
 
-type Step = 'choice' | 'create' | 'import' | 'setPassword';
+type Step = 'choice' | 'create' | 'verify' | 'import' | 'setPassword';
 type ImportMethod = 'mnemonic' | 'privateKey';
+
+// Verification ke liye 3 random positions choose karo
+function getRandomPositions(total: number, count: number): number[] {
+  const positions: number[] = [];
+  while (positions.length < count) {
+    const rand = Math.floor(Math.random() * total);
+    if (!positions.includes(rand)) positions.push(rand);
+  }
+  return positions.sort((a, b) => a - b);
+}
 
 export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletProps) {
   const [step, setStep] = useState<Step>('choice');
@@ -28,10 +38,58 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Password step
   const [pendingWallet, setPendingWallet] = useState<MultiChainWallet | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Verify step
+  const [verifyPositions, setVerifyPositions] = useState<number[]>([]);
+  const [verifyInputs, setVerifyInputs] = useState<Record<number, string>>({});
+  const [verifyError, setVerifyError] = useState('');
+  const [shakeError, setShakeError] = useState(false);
+
+  // ─── Verify step setup ────────────────────────────────────────────
+
+  useEffect(() => {
+    if (step === 'verify' && mnemonic) {
+      const words = mnemonic.split(' ');
+      const positions = getRandomPositions(words.length, 3);
+      setVerifyPositions(positions);
+      setVerifyInputs({});
+      setVerifyError('');
+    }
+  }, [step, mnemonic]);
+
+  const handleVerify = () => {
+    const words = mnemonic.split(' ');
+    let allCorrect = true;
+
+    for (const pos of verifyPositions) {
+      const entered = (verifyInputs[pos] || '').trim().toLowerCase();
+      const correct = words[pos].toLowerCase();
+      if (entered !== correct) {
+        allCorrect = false;
+        break;
+      }
+    }
+
+    if (!allCorrect) {
+      setVerifyError('Some words are incorrect. Please check and try again.');
+      setShakeError(true);
+      setTimeout(() => setShakeError(false), 600);
+      return;
+    }
+
+    // Verification passed — wallet banao aur password step pe jao
+    try {
+      const wallet = WalletService.createMultiChainWallet(mnemonic);
+      goToSetPassword(wallet);
+    } catch {
+      setVerifyError('Failed to create wallet. Please try again.');
+    }
+  };
 
   // ─── Go to set password step ──────────────────────────────────────
 
@@ -44,18 +102,15 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
 
   const handleSetPassword = async () => {
     setError('');
-
     const passwordAlreadySet = StorageService.hasPasswordSet();
 
     if (passwordAlreadySet) {
-      // Existing password verify karo
       const isCorrect = await StorageService.verifyPassword(password);
       if (!isCorrect) {
         setError('Incorrect password. Please enter your existing wallet password.');
         return;
       }
     } else {
-      // New password set karo
       if (password.length < 8) {
         setError('Password must be at least 8 characters');
         return;
@@ -100,20 +155,13 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirmWallet = async () => {
+  // Confirmed checkbox ke baad verify step pe jao
+  const handleConfirmWallet = () => {
     if (!confirmed) {
       setError('Please confirm that you have saved your recovery phrase');
       return;
     }
-    setLoading(true);
-    try {
-      const wallet = WalletService.createMultiChainWallet(mnemonic);
-      goToSetPassword(wallet);
-    } catch {
-      setError('Failed to create wallet. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    setStep('verify');
   };
 
   // ─── Import via mnemonic ──────────────────────────────────────────
@@ -209,9 +257,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
           const actualLength = trimmedPrivateKey.startsWith('0x')
             ? trimmedPrivateKey.length - 2
             : trimmedPrivateKey.length;
-          setError(
-            `Invalid EVM private key format. Expected 64 hex characters, got ${actualLength}.`
-          );
+          setError(`Invalid EVM private key format. Expected 64 hex characters, got ${actualLength}.`);
           setLoading(false);
           return;
         }
@@ -226,11 +272,11 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
           mnemonic: '[Private Key Import - No Mnemonic Available]',
           accounts: {
             ethereum: { ...importedAccount, network: 'ethereum' as const },
-            polygon: { ...importedAccount, network: 'polygon' as const },
-            binance: { ...importedAccount, network: 'binance' as const },
-            base: { ...importedAccount, network: 'base' as const },
-            solana: placeholderSolana,
-            bitcoin: placeholderBitcoin,
+            polygon:  { ...importedAccount, network: 'polygon'  as const },
+            binance:  { ...importedAccount, network: 'binance'  as const },
+            base:     { ...importedAccount, network: 'base'     as const },
+            solana:   placeholderSolana,
+            bitcoin:  placeholderBitcoin,
           },
           createdAt: Date.now(),
         };
@@ -244,7 +290,141 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     }
   };
 
-  // ─── Set Password Screen ──────────────────────────────────────────
+  // ─── VERIFY SCREEN ────────────────────────────────────────────────
+
+  {/* Verify Screen */}
+if (step === 'verify') {
+  const words = mnemonic.split(' ');
+
+  return (
+    <div className="min-h-screen flex flex-col p-6 bg-white">
+      <button
+        onClick={() => setStep('create')}
+        className="flex items-center gap-2 text-gray-600 mb-6"
+      >
+        <ArrowLeft className="w-5 h-5" />
+        Back
+      </button>
+
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="flex justify-center mb-4">
+          <div className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] p-4 rounded-2xl">
+            <ShieldCheck className="w-8 h-8 text-white" />
+          </div>
+        </div>
+
+        <h1 className="text-2xl font-bold text-gray-900 mb-2 text-center">
+          Confirm Your Phrase
+        </h1>
+        <p className="text-gray-500 text-center text-sm mb-8 px-4">
+          Select the correct word for each position to verify you've saved your recovery phrase.
+        </p>
+
+        {/* Word number pills */}
+        <div className="flex justify-center gap-3 mb-6">
+          {verifyPositions.map((p) => (
+            <div
+              key={p}
+              className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
+                         text-white text-xs font-semibold px-4 py-2 rounded-full"
+            >
+              Word #{p + 1}
+            </div>
+          ))}
+        </div>
+
+        {/* 3 Input cards */}
+        <div className="space-y-3 mb-6">
+          {verifyPositions.map((index) => (
+            <div
+              key={index}
+              className={`w-full rounded-2xl border-2 p-4 transition-all ${
+                verifyInputs[index]
+                  ? 'border-[#1A2B4C] bg-blue-50/30'
+                  : 'border-gray-200 bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                {/* Number badge */}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
+                                flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-xs font-bold">{index + 1}</span>
+                </div>
+
+                {/* Input */}
+                <div className="flex-1">
+                  <p className="text-xs text-gray-400 mb-1">Word #{index + 1}</p>
+                  <input
+                    type="text"
+                    value={verifyInputs[index] || ''}
+                    onChange={(e) =>
+                      setVerifyInputs((prev) => ({
+                        ...prev,
+                        [index]: e.target.value,
+                      }))
+                    }
+                    placeholder={`Enter word #${index + 1}`}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    className="w-full text-sm font-medium bg-transparent
+                               focus:outline-none text-gray-900 placeholder-gray-300"
+                  />
+                </div>
+
+                {/* Check icon jab filled ho */}
+                {verifyInputs[index] && (
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-3 h-3 text-green-600" />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Error */}
+        {verifyError && (
+          <div className={`bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl mb-4 text-sm text-center ${
+            shakeError ? 'animate-shake' : ''
+          }`}>
+            ❌ {verifyError}
+          </div>
+        )}
+
+        {/* Progress dots */}
+        <div className="flex justify-center gap-2 mb-6">
+          {verifyPositions.map((p) => (
+            <div
+              key={p}
+              className={`h-2 rounded-full transition-all duration-300 ${
+                verifyInputs[p]?.trim()
+                  ? 'w-6 bg-[#1A2B4C]'
+                  : 'w-2 bg-gray-300'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Button */}
+        <button
+          onClick={handleVerify}
+          disabled={verifyPositions.some((p) => !verifyInputs[p]?.trim())}
+          className="w-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
+                     text-white py-4 rounded-2xl font-semibold
+                     disabled:opacity-40 disabled:cursor-not-allowed
+                     active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <ShieldCheck className="w-5 h-5" />
+          Confirm & Continue
+        </button>
+      </div>
+    </div>
+  );
+}
+
+  // ─── SET PASSWORD SCREEN ──────────────────────────────────────────
 
   if (step === 'setPassword') {
     const passwordAlreadySet = StorageService.hasPasswordSet();
@@ -294,7 +474,6 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
             </button>
           </div>
 
-          {/* Confirm field sirf tab jab pehli baar password set ho raha ho */}
           {!passwordAlreadySet && (
             <input
               type={showPassword ? 'text' : 'password'}
@@ -308,9 +487,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
           )}
 
           {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm mt-2">
-              {error}
-            </div>
+            <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm mt-2">{error}</div>
           )}
 
           <button
@@ -329,7 +506,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     );
   }
 
-  // ─── Choice Screen ────────────────────────────────────────────────
+  // ─── CHOICE SCREEN ────────────────────────────────────────────────
 
   if (step === 'choice') {
     return (
@@ -375,7 +552,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     );
   }
 
-  // ─── Create Screen ────────────────────────────────────────────────
+  // ─── CREATE SCREEN ────────────────────────────────────────────────
 
   if (step === 'create') {
     return (
@@ -425,11 +602,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
                 onClick={handleCopyMnemonic}
                 className="w-full btn-outline mb-6 flex items-center justify-center gap-2"
               >
-                {copied ? (
-                  <><Check className="w-5 h-5" />Copied!</>
-                ) : (
-                  <><Copy className="w-5 h-5" />Copy to Clipboard</>
-                )}
+                {copied ? <><Check className="w-5 h-5" />Copied!</> : <><Copy className="w-5 h-5" />Copy to Clipboard</>}
               </button>
               <label className="flex items-center gap-3 mb-6 cursor-pointer">
                 <input
@@ -447,10 +620,9 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
               )}
               <button
                 onClick={handleConfirmWallet}
-                disabled={loading || !confirmed}
+                disabled={!confirmed}
                 className="w-full btn-primary flex items-center justify-center gap-2"
               >
-                {loading && <div className="spinner" />}
                 Continue
               </button>
             </>
@@ -460,7 +632,7 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     );
   }
 
-  // ─── Import Screen ────────────────────────────────────────────────
+  // ─── IMPORT SCREEN ────────────────────────────────────────────────
 
   if (step === 'import') {
     return (
@@ -564,11 +736,9 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
                   value={privateKey}
                   onChange={(e) => setPrivateKey(e.target.value)}
                   placeholder={
-                    selectedNetwork === 'solana'
-                      ? 'Base58 or hex...'
-                      : selectedNetwork === 'bitcoin'
-                      ? 'WIF or 64 hex chars...'
-                      : '0x... or without prefix'
+                    selectedNetwork === 'solana' ? 'Base58 or hex...'
+                    : selectedNetwork === 'bitcoin' ? 'WIF or 64 hex chars...'
+                    : '0x... or without prefix'
                   }
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl pr-12
                              focus:border-trust-blue focus:outline-none font-mono text-sm"

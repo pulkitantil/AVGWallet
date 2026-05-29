@@ -46,7 +46,7 @@ base: {
   solana: {
     name: 'Solana',
     symbol: 'SOL',
-    rpcUrl: `https://solana-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_SOLANA_API_KEY}`,  // Alchemy Solana RPC
+    rpcUrl: `https://solana-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`,
     explorer: 'https://solscan.io',
     logo: '◎',
     color: '#14F195',
