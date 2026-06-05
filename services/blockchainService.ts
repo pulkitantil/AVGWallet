@@ -3,6 +3,7 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction as 
 import axios from 'axios';
 import { BlockchainNetwork, SendTransactionParams, Token } from '@/types';
 import { NETWORKS } from '@/config/networks';
+import { StorageService } from '@/services/storageService';
 
 // ERC20 ABI for token interactions
 const ERC20_ABI = [
@@ -17,10 +18,14 @@ export class BlockchainService {
   /**
    * Get EVM provider for a network
    */
-  private static getEVMProvider(network: BlockchainNetwork): ethers.JsonRpcProvider {
-    const config = NETWORKS[network];
-    return new ethers.JsonRpcProvider(config.rpcUrl);
-  }
+  private static getEVMProvider(network: string): ethers.JsonRpcProvider {
+  const config =
+    NETWORKS[network] ??
+    StorageService.getCustomNetworks().find((n) => n.name === network);
+
+  if (!config) throw new Error(`Unknown network: ${network}`);
+  return new ethers.JsonRpcProvider(config.rpcUrl);
+}
 
   /**
    * Get Solana connection
@@ -103,10 +108,10 @@ export class BlockchainService {
    * Get ERC20 token balance
    */
   static async getTokenBalance(
-    tokenAddress: string,
-    walletAddress: string,
-    network: BlockchainNetwork
-  ): Promise<{ balance: string; decimals: number }> {
+  tokenAddress: string,
+  walletAddress: string,
+  network: string          
+): Promise<{ balance: string; decimals: number }>{
     try {
       const provider = this.getEVMProvider(network);
       const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
@@ -128,9 +133,9 @@ export class BlockchainService {
    * Get token metadata
    */
   static async getTokenMetadata(
-    tokenAddress: string,
-    network: BlockchainNetwork
-  ): Promise<{ name: string; symbol: string; decimals: number }> {
+  tokenAddress: string,
+  network: string          // ← BlockchainNetwork se string
+): Promise<{ name: string; symbol: string; decimals: number }> {
     try {
       const provider = this.getEVMProvider(network);
       const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);

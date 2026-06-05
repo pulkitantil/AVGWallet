@@ -17,7 +17,6 @@ export default function Home() {
 
   useEffect(() => {
     const hasWallet = StorageService.hasWallet();
-    // Wallet exist karta hai → unlock screen, dashboard nahi
     if (hasWallet) {
       setCurrentScreen('unlock');
     }
@@ -31,13 +30,24 @@ export default function Home() {
       setCurrentScreen('dashboard');
       return true;
     }
-    return false; // Wrong password
+    return false;
   };
 
-  // Lock = sirf RAM clear karo, localStorage intact rehta hai
+  // After a new wallet is created and saved, unlock it immediately — no second password prompt
+  const handleWalletCreated = (wallet: MultiChainWallet) => {
+    setUnlockedWallet(wallet);
+    setCurrentScreen('dashboard');
+  };
+
   const handleLock = () => {
     setUnlockedWallet(null);
     setCurrentScreen('unlock');
+  };
+
+  const handleDeleteWallet = async () => {
+    await StorageService.deleteWallet();
+    setUnlockedWallet(null);
+    setCurrentScreen('welcome');
   };
 
   if (loading) {
@@ -55,7 +65,7 @@ export default function Home() {
   if (currentScreen === 'create') {
     return (
       <CreateWallet
-        onWalletCreated={() => setCurrentScreen('unlock')}
+        onWalletCreated={handleWalletCreated}
         onBack={() => setCurrentScreen('welcome')}
       />
     );
@@ -65,15 +75,11 @@ export default function Home() {
     return (
       <UnlockWallet
         onUnlock={handleUnlock}
-        onDeleteWallet={() => {
-          StorageService.deleteWallet();
-          setCurrentScreen('welcome');
-        }}
+        onDeleteWallet={handleDeleteWallet}
       />
     );
   }
 
-  // Dashboard sirf tab dikhega jab wallet RAM mein ho
   if (currentScreen === 'dashboard' && unlockedWallet) {
     return (
       <WalletDashboard
@@ -83,6 +89,5 @@ export default function Home() {
     );
   }
 
-  // Fallback — kabhi nahi aana chahiye
   return null;
 }

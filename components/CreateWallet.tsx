@@ -7,14 +7,13 @@ import { StorageService } from '@/services/storageService';
 import { BlockchainNetwork, MultiChainWallet } from '@/types';
 
 interface CreateWalletProps {
-  onWalletCreated: () => void;
+  onWalletCreated: (wallet: MultiChainWallet) => void;
   onBack: () => void;
 }
 
 type Step = 'choice' | 'create' | 'verify' | 'import' | 'setPassword';
 type ImportMethod = 'mnemonic' | 'privateKey';
 
-// Verification ke liye 3 random positions choose karo
 function getRandomPositions(total: number, count: number): number[] {
   const positions: number[] = [];
   while (positions.length < count) {
@@ -50,7 +49,9 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
   const [verifyError, setVerifyError] = useState('');
   const [shakeError, setShakeError] = useState(false);
 
-  // ─── Verify step setup ────────────────────────────────────────────
+  // Is this the very first wallet? If a wallet already exists in DB,
+  // we skip the password screen entirely and save with the existing password.
+  const isFirstWallet = !StorageService.hasPasswordSet();
 
   useEffect(() => {
     if (step === 'verify' && mnemonic) {
@@ -61,6 +62,23 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
       setVerifyError('');
     }
   }, [step, mnemonic]);
+
+  // ─── Go to set password OR skip straight to save ──────────────────
+
+  const goToSetPassword = (wallet: MultiChainWallet) => {
+    setPendingWallet(wallet);
+    if (isFirstWallet) {
+      // First ever wallet — ask for password
+      setStep('setPassword');
+    } else {
+      // Subsequent wallet — save silently using existing password
+      // We can't re-use the old encryption key without the password,
+      // so we ask once more but label it clearly as "confirm existing password"
+      setStep('setPassword');
+    }
+  };
+
+  // ─── Verify screen ────────────────────────────────────────────────
 
   const handleVerify = () => {
     const words = mnemonic.split(' ');
@@ -82,7 +100,6 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
       return;
     }
 
-    // Verification passed — wallet banao aur password step pe jao
     try {
       const wallet = WalletService.createMultiChainWallet(mnemonic);
       goToSetPassword(wallet);
@@ -91,26 +108,13 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     }
   };
 
-  // ─── Go to set password step ──────────────────────────────────────
-
-  const goToSetPassword = (wallet: MultiChainWallet) => {
-    setPendingWallet(wallet);
-    setStep('setPassword');
-  };
-
-  // ─── Handle set / verify password ────────────────────────────────
+  // ─── Handle set / confirm password ───────────────────────────────
 
   const handleSetPassword = async () => {
     setError('');
-    const passwordAlreadySet = StorageService.hasPasswordSet();
 
-    if (passwordAlreadySet) {
-      const isCorrect = await StorageService.verifyPassword(password);
-      if (!isCorrect) {
-        setError('Incorrect password. Please enter your existing wallet password.');
-        return;
-      }
-    } else {
+    if (isFirstWallet) {
+      // First wallet — validate new password
       if (password.length < 8) {
         setError('Password must be at least 8 characters');
         return;
@@ -119,17 +123,22 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
         setError('Passwords do not match');
         return;
       }
+    } else {
+      // Subsequent wallet — verify existing password
+      const isCorrect = await StorageService.verifyPassword(password);
+      if (!isCorrect) {
+        setError('Incorrect password. Please enter your existing wallet password.');
+        return;
+      }
     }
 
     if (!pendingWallet) return;
 
     setLoading(true);
     try {
-      if (!passwordAlreadySet) {
-        await StorageService.savePasswordHash(password);
-      }
       await StorageService.saveWallet(pendingWallet, password);
-      onWalletCreated();
+      // Pass the wallet straight to dashboard — no second unlock needed
+      onWalletCreated(pendingWallet);
     } catch {
       setError('Failed to save wallet. Please try again.');
     } finally {
@@ -155,7 +164,6 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Confirmed checkbox ke baad verify step pe jao
   const handleConfirmWallet = () => {
     if (!confirmed) {
       setError('Please confirm that you have saved your recovery phrase');
@@ -292,149 +300,95 @@ export default function CreateWallet({ onWalletCreated, onBack }: CreateWalletPr
 
   // ─── VERIFY SCREEN ────────────────────────────────────────────────
 
-  {/* Verify Screen */}
-if (step === 'verify') {
-  const words = mnemonic.split(' ');
-
-  return (
-    <div className="min-h-screen flex flex-col p-6 bg-white">
-      <button
-        onClick={() => setStep('create')}
-        className="flex items-center gap-2 text-gray-600 mb-6"
-      >
-        <ArrowLeft className="w-5 h-5" />
-        Back
-      </button>
-
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="flex justify-center mb-4">
-          <div className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] p-4 rounded-2xl">
-            <ShieldCheck className="w-8 h-8 text-white" />
-          </div>
-        </div>
-
-        <h1 className="text-2xl font-bold text-gray-900 mb-2 text-center">
-          Confirm Your Phrase
-        </h1>
-        <p className="text-gray-500 text-center text-sm mb-8 px-4">
-          Select the correct word for each position to verify you've saved your recovery phrase.
-        </p>
-
-        {/* Word number pills */}
-        <div className="flex justify-center gap-3 mb-6">
-          {verifyPositions.map((p) => (
-            <div
-              key={p}
-              className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
-                         text-white text-xs font-semibold px-4 py-2 rounded-full"
-            >
-              Word #{p + 1}
-            </div>
-          ))}
-        </div>
-
-        {/* 3 Input cards */}
-        <div className="space-y-3 mb-6">
-          {verifyPositions.map((index) => (
-            <div
-              key={index}
-              className={`w-full rounded-2xl border-2 p-4 transition-all ${
-                verifyInputs[index]
-                  ? 'border-[#1A2B4C] bg-blue-50/30'
-                  : 'border-gray-200 bg-gray-50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                {/* Number badge */}
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
-                                flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs font-bold">{index + 1}</span>
-                </div>
-
-                {/* Input */}
-                <div className="flex-1">
-                  <p className="text-xs text-gray-400 mb-1">Word #{index + 1}</p>
-                  <input
-                    type="text"
-                    value={verifyInputs[index] || ''}
-                    onChange={(e) =>
-                      setVerifyInputs((prev) => ({
-                        ...prev,
-                        [index]: e.target.value,
-                      }))
-                    }
-                    placeholder={`Enter word #${index + 1}`}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck="false"
-                    className="w-full text-sm font-medium bg-transparent
-                               focus:outline-none text-gray-900 placeholder-gray-300"
-                  />
-                </div>
-
-                {/* Check icon jab filled ho */}
-                {verifyInputs[index] && (
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <Check className="w-3 h-3 text-green-600" />
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Error */}
-        {verifyError && (
-          <div className={`bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl mb-4 text-sm text-center ${
-            shakeError ? 'animate-shake' : ''
-          }`}>
-            ❌ {verifyError}
-          </div>
-        )}
-
-        {/* Progress dots */}
-        <div className="flex justify-center gap-2 mb-6">
-          {verifyPositions.map((p) => (
-            <div
-              key={p}
-              className={`h-2 rounded-full transition-all duration-300 ${
-                verifyInputs[p]?.trim()
-                  ? 'w-6 bg-[#1A2B4C]'
-                  : 'w-2 bg-gray-300'
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Button */}
-        <button
-          onClick={handleVerify}
-          disabled={verifyPositions.some((p) => !verifyInputs[p]?.trim())}
-          className="w-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
-                     text-white py-4 rounded-2xl font-semibold
-                     disabled:opacity-40 disabled:cursor-not-allowed
-                     active:scale-95 transition-all flex items-center justify-center gap-2"
-        >
-          <ShieldCheck className="w-5 h-5" />
-          Confirm & Continue
+  if (step === 'verify') {
+    return (
+      <div className="min-h-screen flex flex-col p-6 bg-white">
+        <button onClick={() => setStep('create')} className="flex items-center gap-2 text-gray-600 mb-6">
+          <ArrowLeft className="w-5 h-5" />
+          Back
         </button>
+
+        <div className="flex-1 flex flex-col">
+          <div className="flex justify-center mb-4">
+            <div className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] p-4 rounded-2xl">
+              <ShieldCheck className="w-8 h-8 text-white" />
+            </div>
+          </div>
+
+          <h1 className="text-2xl font-bold text-gray-900 mb-2 text-center">Confirm Your Phrase</h1>
+          <p className="text-gray-500 text-center text-sm mb-8 px-4">
+            Enter the correct word for each position to verify you&apos;ve saved your recovery phrase.
+          </p>
+
+          <div className="flex justify-center gap-3 mb-6">
+            {verifyPositions.map((p) => (
+              <div key={p} className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white text-xs font-semibold px-4 py-2 rounded-full">
+                Word #{p + 1}
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-3 mb-6">
+            {verifyPositions.map((index) => (
+              <div key={index} className={`w-full rounded-2xl border-2 p-4 transition-all ${verifyInputs[index] ? 'border-[#1A2B4C] bg-blue-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs font-bold">{index + 1}</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-400 mb-1">Word #{index + 1}</p>
+                    <input
+                      type="text"
+                      value={verifyInputs[index] || ''}
+                      onChange={(e) => setVerifyInputs((prev) => ({ ...prev, [index]: e.target.value }))}
+                      placeholder={`Enter word #${index + 1}`}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      className="w-full text-sm font-medium bg-transparent focus:outline-none text-gray-900 placeholder-gray-300"
+                    />
+                  </div>
+                  {verifyInputs[index] && (
+                    <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                      <Check className="w-3 h-3 text-green-600" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {verifyError && (
+            <div className={`bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl mb-4 text-sm text-center ${shakeError ? 'animate-shake' : ''}`}>
+              ❌ {verifyError}
+            </div>
+          )}
+
+          <div className="flex justify-center gap-2 mb-6">
+            {verifyPositions.map((p) => (
+              <div key={p} className={`h-2 rounded-full transition-all duration-300 ${verifyInputs[p]?.trim() ? 'w-6 bg-[#1A2B4C]' : 'w-2 bg-gray-300'}`} />
+            ))}
+          </div>
+
+          <button
+            onClick={handleVerify}
+            disabled={verifyPositions.some((p) => !verifyInputs[p]?.trim())}
+            className="w-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white py-4 rounded-2xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <ShieldCheck className="w-5 h-5" />
+            Confirm & Continue
+          </button>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   // ─── SET PASSWORD SCREEN ──────────────────────────────────────────
 
   if (step === 'setPassword') {
-    const passwordAlreadySet = StorageService.hasPasswordSet();
-
     return (
       <div className="min-h-screen flex flex-col p-6 bg-white">
-        <button
-          onClick={() => setStep('choice')}
-          className="flex items-center gap-2 text-gray-600 mb-8"
-        >
+        <button onClick={() => setStep('choice')} className="flex items-center gap-2 text-gray-600 mb-8">
           <ArrowLeft className="w-5 h-5" />
           Back
         </button>
@@ -447,12 +401,12 @@ if (step === 'verify') {
           </div>
 
           <h1 className="text-3xl font-bold text-gray-900 mb-2 text-center">
-            {passwordAlreadySet ? 'Enter Your Password' : 'Set Password'}
+            {isFirstWallet ? 'Set Password' : 'Confirm Password'}
           </h1>
           <p className="text-gray-600 mb-8 text-center text-sm">
-            {passwordAlreadySet
-              ? 'Use your existing wallet password to save this wallet.'
-              : 'This password encrypts your wallet on this device. You will need it every time you open the app.'}
+            {isFirstWallet
+              ? 'This password encrypts your wallet. You will only need to set it once.'
+              : 'Enter your existing wallet password to save this wallet.'}
           </p>
 
           <div className="relative mb-4">
@@ -460,10 +414,9 @@ if (step === 'verify') {
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={passwordAlreadySet ? 'Enter existing password' : 'Password (min. 8 characters)'}
+              placeholder={isFirstWallet ? 'Password (min. 8 characters)' : 'Enter your password'}
               autoFocus
-              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl pr-12
-                         focus:border-blue-500 focus:outline-none"
+              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl pr-12 focus:border-blue-500 focus:outline-none"
             />
             <button
               type="button"
@@ -474,15 +427,14 @@ if (step === 'verify') {
             </button>
           </div>
 
-          {!passwordAlreadySet && (
+          {isFirstWallet && (
             <input
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSetPassword()}
               placeholder="Confirm password"
-              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl mb-2
-                         focus:border-blue-500 focus:outline-none"
+              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl mb-2 focus:border-blue-500 focus:outline-none"
             />
           )}
 
@@ -492,14 +444,11 @@ if (step === 'verify') {
 
           <button
             onClick={handleSetPassword}
-            disabled={loading || !password || (!passwordAlreadySet && !confirmPassword)}
-            className="w-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
-                       text-white py-3 rounded-xl font-semibold mt-4
-                       disabled:opacity-50 disabled:cursor-not-allowed
-                       active:scale-95 transition-all flex items-center justify-center gap-2"
+            disabled={loading || !password || (isFirstWallet && !confirmPassword)}
+            className="w-full bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white py-3 rounded-xl font-semibold mt-4 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2"
           >
             {loading && <div className="spinner" />}
-            {passwordAlreadySet ? 'Confirm' : 'Save Wallet'}
+            {isFirstWallet ? 'Save Wallet' : 'Confirm & Save'}
           </button>
         </div>
       </div>
@@ -521,8 +470,7 @@ if (step === 'verify') {
           <div className="space-y-4">
             <button
               onClick={handleCreateWallet}
-              className="primary-theme-btn w-full text-white p-6 rounded-2xl
-                         transition-all duration-200 active:scale-95 flex items-center gap-4"
+              className="primary-theme-btn w-full text-white p-6 rounded-2xl transition-all duration-200 active:scale-95 flex items-center gap-4"
             >
               <div className="bg-white/20 p-3 rounded-xl">
                 <PlusCircle className="w-6 h-6" />
@@ -534,9 +482,7 @@ if (step === 'verify') {
             </button>
             <button
               onClick={() => setStep('import')}
-              className="w-full bg-gray-100 text-gray-900 p-6 rounded-2xl
-                         hover:bg-gray-200 transition-all duration-200 active:scale-95
-                         flex items-center gap-4"
+              className="w-full bg-gray-100 text-gray-900 p-6 rounded-2xl hover:bg-gray-200 transition-all duration-200 active:scale-95 flex items-center gap-4"
             >
               <div className="bg-white p-3 rounded-xl">
                 <Download className="w-6 h-6 text-[#1A2B4C]" />
@@ -586,9 +532,7 @@ if (step === 'verify') {
               <div className="absolute inset-0 flex items-center justify-center">
                 <button
                   onClick={() => setShowMnemonic(true)}
-                  className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F]
-                             text-white px-6 py-3 rounded-xl hover:opacity-90 transition-all
-                             flex items-center gap-2"
+                  className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white px-6 py-3 rounded-xl hover:opacity-90 transition-all flex items-center gap-2"
                 >
                   <Eye className="w-5 h-5" />
                   Reveal Phrase
@@ -598,10 +542,7 @@ if (step === 'verify') {
           </div>
           {showMnemonic && (
             <>
-              <button
-                onClick={handleCopyMnemonic}
-                className="w-full btn-outline mb-6 flex items-center justify-center gap-2"
-              >
+              <button onClick={handleCopyMnemonic} className="w-full btn-outline mb-6 flex items-center justify-center gap-2">
                 {copied ? <><Check className="w-5 h-5" />Copied!</> : <><Copy className="w-5 h-5" />Copy to Clipboard</>}
               </button>
               <label className="flex items-center gap-3 mb-6 cursor-pointer">
@@ -611,18 +552,10 @@ if (step === 'verify') {
                   onChange={(e) => setConfirmed(e.target.checked)}
                   className="w-5 h-5 rounded border-gray-300 accent-[#1A2B4C]"
                 />
-                <span className="text-sm text-gray-700">
-                  I have saved my recovery phrase securely
-                </span>
+                <span className="text-sm text-gray-700">I have saved my recovery phrase securely</span>
               </label>
-              {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>
-              )}
-              <button
-                onClick={handleConfirmWallet}
-                disabled={!confirmed}
-                className="w-full btn-primary flex items-center justify-center gap-2"
-              >
+              {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>}
+              <button onClick={handleConfirmWallet} disabled={!confirmed} className="w-full btn-primary flex items-center justify-center gap-2">
                 Continue
               </button>
             </>
@@ -648,17 +581,13 @@ if (step === 'verify') {
           <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-xl">
             <button
               onClick={() => setImportMethod('mnemonic')}
-              className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                importMethod === 'mnemonic' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-              }`}
+              className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${importMethod === 'mnemonic' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}
             >
               Recovery Phrase
             </button>
             <button
               onClick={() => setImportMethod('privateKey')}
-              className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                importMethod === 'privateKey' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-              }`}
+              className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${importMethod === 'privateKey' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}
             >
               Private Key
             </button>
@@ -671,12 +600,9 @@ if (step === 'verify') {
                 value={importMnemonic}
                 onChange={(e) => setImportMnemonic(e.target.value)}
                 placeholder="Enter your recovery phrase separated by spaces"
-                className="w-full h-40 p-4 border-2 border-gray-200 rounded-xl
-                           focus:border-trust-blue focus:outline-none resize-none mb-6"
+                className="w-full h-40 p-4 border-2 border-gray-200 rounded-xl focus:border-trust-blue focus:outline-none resize-none mb-6"
               />
-              {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>
-              )}
+              {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>}
               <button
                 onClick={handleImportWallet}
                 disabled={loading || !importMnemonic.trim()}
@@ -689,14 +615,11 @@ if (step === 'verify') {
           ) : (
             <>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Blockchain Network
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Blockchain Network</label>
                 <select
                   value={selectedNetwork}
                   onChange={(e) => setSelectedNetwork(e.target.value as BlockchainNetwork)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl
-                             focus:border-trust-blue focus:outline-none"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-trust-blue focus:outline-none"
                 >
                   <optgroup label="EVM Chains (Same Address)">
                     <option value="ethereum">Ethereum (ETH)</option>
@@ -740,8 +663,7 @@ if (step === 'verify') {
                     : selectedNetwork === 'bitcoin' ? 'WIF or 64 hex chars...'
                     : '0x... or without prefix'
                   }
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl pr-12
-                             focus:border-trust-blue focus:outline-none font-mono text-sm"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl pr-12 focus:border-trust-blue focus:outline-none font-mono text-sm"
                 />
                 <button
                   type="button"
@@ -752,9 +674,7 @@ if (step === 'verify') {
                 </button>
               </div>
 
-              {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>
-              )}
+              {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{error}</div>}
               <button
                 onClick={handleImportPrivateKey}
                 disabled={loading || !privateKey.trim()}

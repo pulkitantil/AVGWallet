@@ -71,3 +71,14 @@ export interface SendTransactionParams {
   tokenAddress?: string;
   gasLimit?: string;
 }
+
+export interface CustomNetwork {
+  name: string;
+  rpcUrl: string;
+  chainId: number;
+  symbol: string;
+  explorer: string;
+  logo?: string;
+  color?: string;
+  isCustom: true;
+}

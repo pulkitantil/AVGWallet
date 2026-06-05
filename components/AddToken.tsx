@@ -1,19 +1,20 @@
 'use client';
 
-import { useState } from 'react';
-import { ArrowLeft, Plus, Search } from 'lucide-react';
-import { BlockchainNetwork, Token } from '@/types';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Plus } from 'lucide-react';
+import { BlockchainNetwork, Token, MultiChainWallet } from '@/types';
 import { BlockchainService } from '@/services/blockchainService';
 import { StorageService } from '@/services/storageService';
 import { NETWORKS, COMMON_TOKENS } from '@/config/networks';
 
 interface AddTokenProps {
+  wallet: MultiChainWallet;
   network: BlockchainNetwork;
   onBack: () => void;
   onTokenAdded: () => void;
 }
 
-export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProps) {
+export default function AddToken({ wallet, network, onBack, onTokenAdded }: AddTokenProps) {
   const [tokenAddress, setTokenAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -23,12 +24,30 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
     decimals: number;
   } | null>(null);
 
-  const networkConfig = NETWORKS[network];
-  const commonTokens = COMMON_TOKENS[network] || [];
+  const networkConfig = NETWORKS[network as keyof typeof NETWORKS];
+  const commonTokens = COMMON_TOKENS[network as keyof typeof COMMON_TOKENS] || [];
+  const currentAccount = wallet.accounts[network as BlockchainNetwork];
 
-  const handleSearchToken = async () => {
-    if (!tokenAddress.trim()) {
+  // Auto-fetch when a valid address is typed
+  useEffect(() => {
+    const address = tokenAddress.trim();
+    if (address.length === 42 && address.startsWith('0x')) {
+      handleSearchToken(address);
+    } else {
+      setTokenInfo(null);
+    }
+  }, [tokenAddress]);
+
+  const handleSearchToken = async (addressToSearch?: string) => {
+    const address = addressToSearch || tokenAddress;
+
+    if (!address.trim()) {
       setError('Please enter a token address');
+      return;
+    }
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
+      setError('Invalid format. Address must be 42 characters starting with 0x.');
       return;
     }
 
@@ -37,12 +56,13 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
 
     try {
       const metadata = await BlockchainService.getTokenMetadata(
-        tokenAddress.trim(),
-        network
+        address.trim(),
+        network as string
       );
       setTokenInfo(metadata);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch token information');
+      console.error(err);
+      setError(`Token not found on ${networkConfig?.name || 'this network'}. Make sure the address is correct.`);
       setTokenInfo(null);
     } finally {
       setLoading(false);
@@ -50,20 +70,14 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
   };
 
   const handleAddToken = async () => {
-    if (!tokenInfo) return;
+    if (!tokenInfo || !currentAccount) return;
 
     try {
-      const wallet = StorageService.getWallet();
-      if (!wallet) {
-        setError('Wallet not found');
-        return;
-      }
-
-      const walletAddress = wallet.accounts[network].address;
+      setLoading(true);
       const { balance } = await BlockchainService.getTokenBalance(
         tokenAddress.trim(),
-        walletAddress,
-        network
+        currentAccount.address,
+        network as string
       );
 
       const token: Token = {
@@ -72,13 +86,15 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
         name: tokenInfo.name,
         decimals: tokenInfo.decimals,
         balance,
-        network,
+        network: network as BlockchainNetwork,
       };
 
-      StorageService.addToken(token);
+      await StorageService.addToken(token);
       onTokenAdded();
     } catch (err: any) {
       setError(err.message || 'Failed to add token');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -88,32 +104,32 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
     name: string;
     decimals: number;
   }) => {
-    try {
-      const wallet = StorageService.getWallet();
-      if (!wallet) return;
+    if (!currentAccount) return;
 
-      const walletAddress = wallet.accounts[network].address;
+    try {
       const { balance } = await BlockchainService.getTokenBalance(
         token.address,
-        walletAddress,
-        network
+        currentAccount.address,
+        network as string
       );
 
       const newToken: Token = {
         ...token,
         balance,
-        network,
+        network: network as BlockchainNetwork,
       };
 
-      StorageService.addToken(newToken);
+      await StorageService.addToken(newToken);
       onTokenAdded();
     } catch (err) {
       console.error('Error adding token:', err);
+      setError(`Could not add ${token.symbol}. Please try again.`);
     }
   };
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
+      {/* Header */}
       <div className="bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white p-6 rounded-b-3xl shadow-2xl">
         <button
           onClick={onBack}
@@ -124,7 +140,7 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
         </button>
         <h1 className="text-2xl font-bold">Add Token</h1>
         <p className="text-blue-100 mt-1">
-          Import custom tokens to {networkConfig.name}
+          Import custom tokens to {networkConfig?.name || 'Network'}
         </p>
       </div>
 
@@ -132,7 +148,7 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
         {/* Popular Tokens */}
         {commonTokens.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-lg font-semibold text-gray-700 mb-2">
+            <h2 className="text-lg font-semibold text-gray-700 mb-3">
               Popular Tokens
             </h2>
             <div className="space-y-2">
@@ -140,20 +156,22 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
                 <button
                   key={token.address}
                   onClick={() => handleAddCommonToken(token)}
-                  className="w-full card-hover flex items-center justify-between"
+                  className="w-full bg-gray-50 hover:bg-gray-100 rounded-2xl px-4 py-3 flex items-center justify-between transition-all active:scale-95"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                      <span className="text-lg font-bold text-gray-600">
+                    <div className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center shadow-sm">
+                      <span className="text-base font-bold text-gray-700">
                         {token.symbol.charAt(0)}
                       </span>
                     </div>
                     <div className="text-left">
-                      <p className="font-semibold text-white">{token.symbol}</p>
-                      <p className="text-sm text-gray-400">{token.name}</p>
+                      <p className="font-semibold text-gray-900">{token.symbol}</p>
+                      <p className="text-sm text-gray-500">{token.name}</p>
                     </div>
                   </div>
-                  <Plus className="w-5 h-5 text-trust-blue" />
+                  <div className="w-8 h-8 bg-[#A0E817]/15 rounded-full flex items-center justify-center">
+                    <Plus className="w-4 h-4 text-[#A0E817]" />
+                  </div>
                 </button>
               ))}
             </div>
@@ -166,67 +184,74 @@ export default function AddToken({ network, onBack, onTokenAdded }: AddTokenProp
             Custom Token
           </h2>
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Token Contract Address
-            </label>
-            <div className="flex gap-2">
+          <div className="space-y-4">
+            {/* Token Address Input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Token Contract Address
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={tokenAddress}
+                  onChange={(e) => {
+                    setTokenAddress(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="0x..."
+                  className="input-field w-full pr-12"
+                />
+                {loading && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    <div className="spinner w-5 h-5 border-2 border-blue-600" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Token Symbol */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Token Symbol
+              </label>
               <input
                 type="text"
-                value={tokenAddress}
-                onChange={(e) => setTokenAddress(e.target.value)}
-                placeholder="0x..."
-                className="input-field flex-1"
+                value={tokenInfo ? tokenInfo.symbol : ''}
+                readOnly
+                placeholder="e.g. USDT"
+                className="input-field bg-gray-100 text-gray-600 cursor-not-allowed outline-none"
               />
-              <button
-                onClick={handleSearchToken}
-                disabled={loading}
-                className="primary-theme-btn btn-primary px-4 flex items-center gap-2"
-              >
-                {loading ? (
-                  <div className="spinner" />
-                ) : (
-                  <Search className="w-5 h-5" />
-                )}
-              </button>
+            </div>
+
+            {/* Token Decimals */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Token Decimal
+              </label>
+              <input
+                type="text"
+                value={tokenInfo ? tokenInfo.decimals.toString() : ''}
+                readOnly
+                placeholder="e.g. 18"
+                className="input-field bg-gray-100 text-gray-600 cursor-not-allowed outline-none"
+              />
             </div>
           </div>
 
           {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 text-sm">
+            <div className="mt-4 bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm">
               {error}
             </div>
           )}
 
-          {tokenInfo && (
-            <div className="bg-[#A0E817]/15 rounded-xl p-6 mb-4">
-              <h3 className="font-semibold text-gray-900 mb-4">
-                Token Information
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Name:</span>
-                  <span className="font-medium text-gray-900">{tokenInfo.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#A0E817]">Symbol:</span>
-                  <span className="font-medium text-gray-900">{tokenInfo.symbol}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#A0E817]">Decimals:</span>
-                  <span className="font-medium text-gray-900">{tokenInfo.decimals}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={handleAddToken}
-                className="w-full btn-primary mt-6 flex items-center justify-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Add Token
-              </button>
-            </div>
-          )}
+          <button
+            onClick={handleAddToken}
+            disabled={!tokenInfo || loading}
+            className="w-full mt-6 bg-gradient-to-br from-[#0B1220] via-[#1A2B4C] to-[#1E3A5F] text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-5 h-5" />
+            Add Token
+          </button>
         </div>
       </div>
     </div>

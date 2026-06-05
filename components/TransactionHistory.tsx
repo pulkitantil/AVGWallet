@@ -26,17 +26,21 @@ export default function TransactionHistory({
     loadTransactions();
   }, [address, network]);
 
-  const loadTransactions = () => {
-    const allTransactions = StorageService.getTransactions();
-    const filtered = allTransactions.filter(
-      (tx) =>
-        tx.network === network &&
-        (tx.from.toLowerCase() === address.toLowerCase() ||
-          tx.to.toLowerCase() === address.toLowerCase())
-    );
-    setTransactions(filtered);
-    setLoading(false);
-  };
+  const loadTransactions = async () => {
+  const allTransactions = await StorageService.getTransactions();
+
+  const filtered = allTransactions.filter(
+    (tx) =>
+      tx.network === network &&
+      (
+        tx.from.toLowerCase() === address.toLowerCase() ||
+        tx.to.toLowerCase() === address.toLowerCase()
+      )
+  );
+
+  setTransactions(filtered);
+  setLoading(false);
+};
 
   const formatAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
