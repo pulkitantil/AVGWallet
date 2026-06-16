@@ -1,9 +1,5 @@
 /**
  * /app/api/wallet/route.ts
- *
- * POST   /api/wallet  — create or update encrypted wallet
- * GET    /api/wallet?address=0x…  — fetch encrypted blob
- * DELETE /api/wallet?address=0x…  — delete wallet + related data
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,8 +8,40 @@ import WalletModel from '@/models/Wallet';
 import TokenModel from '@/models/Token';
 import TransactionModel from '@/models/Transaction';
 
+// ─── Simple rate limiter (in-memory) ──────────────────────────────────────────
+const rateMap = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateMap.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    rateMap.set(ip, { count: 1, resetAt: now + 60_000 }); // 1 minute window
+    return false;
+  }
+
+  if (entry.count >= 20) return true; // max 20 requests per minute per IP
+
+  entry.count++;
+  return false;
+}
+
+// ─── Get caller IP ─────────────────────────────────────────────────────────────
+function getIP(req: NextRequest): string {
+  return (
+    req.headers.get('x-forwarded-for')?.split(',')[0] ?? 
+    req.headers.get('x-real-ip') ?? 
+    'unknown'
+  );
+}
+
 // ─── POST: Save/Update encrypted wallet ───────────────────────────────────────
 export async function POST(req: NextRequest) {
+  // Rate limit check
+  if (isRateLimited(getIP(req))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  }
+
   try {
     await connectDB();
     const body = await req.json();
@@ -23,7 +51,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Upsert: create if not exists, update if exists
+    // Basic format validation
+    if (!walletAddress.startsWith('0x') || walletAddress.length !== 42) {
+      return NextResponse.json({ error: 'Invalid wallet address' }, { status: 400 });
+    }
+
     const wallet = await WalletModel.findOneAndUpdate(
       { walletAddress },
       { encryptedBlob, salt, iv, passwordHash },
@@ -39,6 +71,10 @@ export async function POST(req: NextRequest) {
 
 // ─── GET: Fetch encrypted blob ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  if (isRateLimited(getIP(req))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  }
+
   try {
     await connectDB();
     const { searchParams } = new URL(req.url);
@@ -48,6 +84,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'address param is required' }, { status: 400 });
     }
 
+    // Basic format validation
+    if (!address.startsWith('0x') || address.length !== 42) {
+      return NextResponse.json({ error: 'Invalid wallet address' }, { status: 400 });
+    }
+
     const wallet = await WalletModel.findOne({ walletAddress: address }).lean();
 
     if (!wallet) {
@@ -55,7 +96,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      exists: true,
+      exists:        true,
       encryptedBlob: wallet.encryptedBlob,
       salt:          wallet.salt,
       iv:            wallet.iv,
@@ -69,6 +110,10 @@ export async function GET(req: NextRequest) {
 
 // ─── DELETE: Remove wallet and all related data ────────────────────────────────
 export async function DELETE(req: NextRequest) {
+  if (isRateLimited(getIP(req))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  }
+
   try {
     await connectDB();
     const { searchParams } = new URL(req.url);
@@ -76,6 +121,10 @@ export async function DELETE(req: NextRequest) {
 
     if (!address) {
       return NextResponse.json({ error: 'address param is required' }, { status: 400 });
+    }
+
+    if (!address.startsWith('0x') || address.length !== 42) {
+      return NextResponse.json({ error: 'Invalid wallet address' }, { status: 400 });
     }
 
     await WalletModel.deleteOne({ walletAddress: address });

@@ -2,7 +2,7 @@
  * services/storageService.ts  (MongoDB + localStorage hybrid)
  *
  * Storage split:
- *   localStorage   → passwordHash, walletAddress, hasWallet flag  (browser-specific, never leaves)
+ *   localStorage   → passwordHash, passwordSalt, walletAddress, hasWallet flag  (browser-specific, never leaves)
  *   MongoDB        → encryptedBlob, salt, iv, tokens, transactions (syncs across devices)
  *   sessionStorage → nothing (removed — we use localStorage for persistence)
  *
@@ -15,6 +15,7 @@
 import { MultiChainWallet, Token, Transaction } from '@/types';
 
 const LS_PASSWORD_HASH = 'avg_password_hash';
+const LS_PASSWORD_SALT = 'avg_password_salt'; // ← naya add kiya
 const LS_WALLET_ADDRESS = 'avg_wallet_address';
 const LS_HAS_WALLET = 'avg_has_wallet';
 const LS_CUSTOM_NETWORKS = 'avg_custom_networks';
@@ -47,24 +48,17 @@ function fromBase64(str: string): Uint8Array {
   return Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 }
 
-/** PBKDF2 hash of password — stored in localStorage for browser-local verification */
-async function derivePasswordHash(password: string): Promise<string> {
+async function derivePasswordHash(password: string, salt: string): Promise<string> {
   const enc = new TextEncoder();
-  const salt = 'avg_wallet_static_salt_v1';
   const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits']
+    'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
   );
   const hashBuffer = await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100_000, hash: 'SHA-256' },
-    keyMaterial,
-    256
+    keyMaterial, 256
   );
   return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
+    .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
@@ -91,31 +85,25 @@ export class StorageService {
 
   // ─── Password (localStorage — browser specific) ──────────────────────────────
 
-  /**
-   * Returns true if a password has been set in THIS browser.
-   * Synchronous — reads localStorage.
-   */
   static hasPasswordSet(): boolean {
     return !!lsGet(LS_PASSWORD_HASH);
   }
 
-  /**
-   * Save password hash to localStorage.
-   * Called once when the user sets their password for the first time in this browser.
-   */
   static async savePasswordHash(password: string): Promise<void> {
-    const hash = await derivePasswordHash(password);
+    // Random salt banao har user ke liye
+    const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    const hash = await derivePasswordHash(password, salt);
     lsSet(LS_PASSWORD_HASH, hash);
+    lsSet(LS_PASSWORD_SALT, salt); // ← salt bhi save karo
   }
 
-  /**
-   * Verify password against the hash stored in localStorage.
-   * Works even when no wallet is loaded yet.
-   */
   static async verifyPassword(password: string): Promise<boolean> {
     const storedHash = lsGet(LS_PASSWORD_HASH);
-    if (!storedHash) return false;
-    const inputHash = await derivePasswordHash(password);
+    const storedSalt = lsGet(LS_PASSWORD_SALT); // ← same salt use karo
+    if (!storedHash || !storedSalt) return false;
+    const inputHash = await derivePasswordHash(password, storedSalt);
     return inputHash === storedHash;
   }
 
@@ -137,18 +125,10 @@ export class StorageService {
 
   // ─── Wallet (encrypted blob → MongoDB) ───────────────────────────────────────
 
-  /**
-   * Synchronous check — reads localStorage flag.
-   * True if a wallet address is cached in this browser.
-   */
   static hasWallet(): boolean {
     return lsGet(LS_HAS_WALLET) === 'true';
   }
 
-  /**
-   * Encrypt wallet in the browser, POST blob to MongoDB.
-   * Also saves password hash to localStorage if not already set.
-   */
   static async saveWallet(wallet: MultiChainWallet, password: string): Promise<void> {
     try {
       // Save password hash to localStorage (browser-specific, first time only)
@@ -166,10 +146,11 @@ export class StorageService {
       const plaintext  = new TextEncoder().encode(JSON.stringify(wallet));
       const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
 
-      // We still send passwordHash to MongoDB so it can be used for
-      // cross-device recovery flows in the future — but browser auth
-      // always uses the localStorage hash first.
-      const passwordHash = await derivePasswordHash(password);
+      // passwordHash ke liye bhi random salt use karo
+      const hashSalt = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      const passwordHash = await derivePasswordHash(password, hashSalt);
 
       const res = await fetch('/api/wallet', {
         method: 'POST',
@@ -190,10 +171,6 @@ export class StorageService {
     }
   }
 
-  /**
-   * Fetch encrypted blob from MongoDB and decrypt in the browser.
-   * Uses the cached address from localStorage to find the right wallet.
-   */
   static async unlockWallet(password: string): Promise<MultiChainWallet | null> {
     try {
       const address = this.getCachedAddress();
@@ -217,36 +194,26 @@ export class StorageService {
     }
   }
 
-  /**
-   * Delete wallet from MongoDB and clear localStorage caches.
-   * Password hash is also cleared so the next wallet setup asks for a new password.
-   */
   static async deleteWallet(): Promise<void> {
     const address = this.getCachedAddress();
     if (address) {
       await fetch(`/api/wallet?address=${encodeURIComponent(address)}`, { method: 'DELETE' });
     }
     this.clearCachedAddress();
-    
+    lsRemove(LS_PASSWORD_HASH);
+    lsRemove(LS_PASSWORD_SALT); // ← salt bhi clear karo
   }
 
-  /**
-   * Change password: verify old → re-encrypt → save new hash to localStorage.
-   */
   static async changePassword(oldPassword: string, newPassword: string): Promise<boolean> {
     try {
-      // Verify old password against localStorage hash
       const isCorrect = await this.verifyPassword(oldPassword);
       if (!isCorrect) return false;
 
-      // Re-encrypt wallet with new password
       const wallet = await this.unlockWallet(oldPassword);
       if (!wallet) return false;
 
       await this.saveWallet(wallet, newPassword);
-
-      // Update localStorage hash with new password
-      await this.savePasswordHash(newPassword);
+      await this.savePasswordHash(newPassword); // ← naya salt + hash save hoga
       return true;
     } catch (error) {
       console.error('Failed to change password:', error);
@@ -358,10 +325,8 @@ export class StorageService {
     this.saveCustomNetworks(networks);
   }
 
-
-
   static logout(): void {
-  this.clearCachedAddress();
-  // Password hash stays — same password if they log back in
-}
+    this.clearCachedAddress();
+    // Password hash stays — same password if they log back in
+  }
 }
